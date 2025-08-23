@@ -309,6 +309,7 @@ function createDownloadButton(dlc) {
               matchingDLC[2],
               matchingDLC[3],
               null,
+              null,
               null
             );
           }
@@ -478,32 +479,47 @@ async function fetchVersions(channelId, versionsContainer = null) {
     versionsContainer.appendChild(loadingMsg);
   }
 
-  const requestData = buildGraphQLRequestData({
-    access_token: oculusStoreAccessToken,
-    variables: JSON.stringify({ releaseChannelID: channelId }),
-    doc_id: "3973666182694273",
-  });
-
   try {
-    const response = await sendGraphQLRequest(requestData);
-    const edges = response?.data?.node?.binaries?.edges;
+    //idrk if this is allowed, but using oculusdb api to get the applications binaries :)
+    const dbUri = `https://oculusdb.rui2015.me/api/v1/connected/${applicationID}`;
+    console.log("DB URI: " + dbUri);
+
+    const response = await fetch(dbUri);
+    const data = await response.json();
+
+    console.log("sam data : " + JSON.stringify(data.versions).substring(0, 100))
+
+    const edges = data?.versions;
     if (!edges || !Array.isArray(edges)) {
       versionDataCache[channelId] = [];
       if (versionsContainer) displayVersions([], versionsContainer);
       return [];
     }
 
-    const versionList = edges.map((edge) => {
-      const node = edge?.node;
-      if (!node) return null;
-      return {
-        version: node.version || 'N/A',
-        changeLog: node.change_log || '',
-        id: node.id,
-        obb: node.obb_binary,
-        versionCode: node.version_code
-      };
-    }).filter(Boolean);
+
+    const versionList = edges.map(edge => {
+    const node = edge;
+    if (!node) return null;
+    if (!node.downloadable) return null;
+
+    // got from https://stackoverflow.com/questions/74599262/how-to-convert-an-iso-time-format-to-something-like-dd-mm-yy-hhmmss-am-pm
+    const formatter = new Intl.DateTimeFormat('en-GB', {
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: 'numeric', minute: '2-digit',
+      hourCycle: 'h12',
+    });
+    const createdDateDate = new Date(node.created_date * 1000);
+    
+
+    return {
+      version: node.version || "N/A",
+      changeLog: node.change_log || "",
+      id: node.id,
+      obb: node.obb_binary,
+      versionCode: node.version_code,
+      datePosted: formatter.format(createdDateDate).toUpperCase()
+    };
+  }).filter(Boolean);
 
     versionDataCache[channelId] = versionList;
     if (versionsContainer) {
@@ -547,7 +563,8 @@ function displayVersions(versionList, versionsContainer) {
         version.changeLog,
         version.id,
         version.obb,
-        version.versionCode
+        version.versionCode,
+        version.datePosted
       );
     });
   }
@@ -600,7 +617,7 @@ function sendGraphQLRequest(requestData) {
   });
 }
 
-function createVersion(parentContainer, version, changeLog, id, obb, versionCode) {
+function createVersion(parentContainer, version, changeLog, id, obb, versionCode, datePosted) {
   const versionRow = document.createElement("div");
   versionRow.className = "list-item";
 
@@ -616,6 +633,9 @@ function createVersion(parentContainer, version, changeLog, id, obb, versionCode
   } else {
     primaryText = changeLog || `Asset ID: ${id}`;
     changeLog = null;
+  }
+  if (datePosted && datePosted != "0") {
+    primaryText += ` (${datePosted})`;
   }
   infoDiv.textContent = primaryText;
 
