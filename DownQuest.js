@@ -480,7 +480,7 @@ async function fetchVersions(channelId, versionsContainer = null) {
   }
 
   try {
-    //idrk if this is allowed, but using oculusdb api to get the applications binaries :)
+    // using oculusdb api with way more things, they allow allows people to use their api for these things :))
     const dbUri = `https://oculusdb.rui2015.me/api/v1/connected/${applicationID}`;
     console.log("DB URI: " + dbUri);
 
