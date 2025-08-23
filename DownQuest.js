@@ -500,7 +500,7 @@ async function fetchVersions(channelId, versionsContainer = null) {
     const versionList = edges.map(edge => {
     const node = edge;
     if (!node) return null;
-    if (!node.downloadable) return null;
+    if (!(node.downloadable && (node.binary_release_channels.nodes.map(x => x.channel_name).includes("LIVE")))) return null;
 
     // got from https://stackoverflow.com/questions/74599262/how-to-convert-an-iso-time-format-to-something-like-dd-mm-yy-hhmmss-am-pm
     const formatter = new Intl.DateTimeFormat('en-GB', {
