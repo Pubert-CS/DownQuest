@@ -167,10 +167,6 @@ async function fetchChannelData() {
       }),
     );
 
-    await Promise.all(
-      channelDataCache.map((channel) => fetchVersions(channel.id)),
-    );
-
     return channelDataCache;
   } catch (error) {
     console.error("Failed to fetch channel data:", error);
@@ -464,81 +460,78 @@ async function fetchVersions(channelId, versionsContainer = null) {
   if (!channelId) return [];
 
   if (versionDataCache[channelId]) {
-    if (versionsContainer) {
-      displayVersions(versionDataCache[channelId], versionsContainer);
-    }
+    if (versionsContainer) displayVersions(versionDataCache[channelId], versionsContainer);
     return versionDataCache[channelId];
   }
 
-  if (versionsContainer) {
-    while (versionsContainer.firstChild) {
-      versionsContainer.removeChild(versionsContainer.firstChild);
-    }
-    const loadingMsg = document.createElement('div');
-    loadingMsg.textContent = 'Fetching versions...';
-    versionsContainer.appendChild(loadingMsg);
-  }
-
   try {
-    // using oculusdb api with way more things, they allow allows people to use their api for these things :))
+    const selectedChannel = channelDataCache.find(c => c.id === channelId);
+    if (!selectedChannel) return [];
+
+    
+    // using oculusdb api with way more things, they allows people to use their api for these things :))
     const dbUri = `https://oculusdb.rui2015.me/api/v1/connected/${applicationID}`;
-    console.log("DB URI: " + dbUri);
+    
+    const [dbRes, gqlRes] = await Promise.all([
+      fetch(dbUri).then(res => res.json()).catch(() => ({ versions: [] })),
+      sendGraphQLRequest(buildGraphQLRequestData({
+        access_token: oculusStoreAccessToken,
+        variables: JSON.stringify({ releaseChannelID: channelId }),
+        doc_id: "3973666182694273"
+      })).catch(() => ({ data: { node: { binaries: { edges: [] } } } }))
+    ]);
 
-    const response = await fetch(dbUri);
-    const data = await response.json();
-
-    console.log("sam data : " + JSON.stringify(data.versions).substring(0, 100))
-
-    const edges = data?.versions;
-    if (!edges || !Array.isArray(edges)) {
-      versionDataCache[channelId] = [];
-      if (versionsContainer) displayVersions([], versionsContainer);
-      return [];
-    }
-
-
-    const versionList = edges.map(edge => {
-    const node = edge;
-    if (!node) return null;
-    if (!(node.downloadable && (node.binary_release_channels.nodes.map(x => x.channel_name).includes("LIVE")))) return null;
+    const dbNodes = dbRes.versions || [];
+    const gqlEdges = gqlRes.data?.node?.binaries?.edges || [];
+    const mergedVersions = new Map();
 
     // got from https://stackoverflow.com/questions/74599262/how-to-convert-an-iso-time-format-to-something-like-dd-mm-yy-hhmmss-am-pm
     const formatter = new Intl.DateTimeFormat('en-GB', {
       year: 'numeric', month: '2-digit', day: '2-digit',
-      hour: 'numeric', minute: '2-digit',
-      hourCycle: 'h12',
+      hour: 'numeric', minute: '2-digit', hourCycle: 'h12',
     });
-    const createdDateDate = new Date(node.created_date * 1000);
-    
 
-    return {
-      version: node.version || "N/A",
-      changeLog: node.change_log || "",
-      id: node.id,
-      obb: node.obb_binary,
-      versionCode: node.version_code,
-      datePosted: formatter.format(createdDateDate).toUpperCase()
+    const process = (node, sourceLabel) => {
+      if (!node || mergedVersions.has(node.id)) return;
+      
+      const isGql = sourceLabel === "(Meta)"; // i was going to make it show which db it was fetched from, but it felt crowded
+      const match = isGql || node.binary_release_channels?.nodes?.some(x => x.channel_name === selectedChannel.name);
+      
+      if (match) {
+        if ((!isGql && node.downloadable) || isGql) {
+          mergedVersions.set(node.id, {
+            version: `${node.version || "N/A"}`,
+            changeLog: node.changeLog || node.change_log || "",
+            id: node.id,
+            obb: node.obb_binary || node.obbList || node.obb,
+            versionCode: node.version_code || node.versionCode,
+            datePosted: node.created_date ? formatter.format(new Date(node.created_date * 1000)).toUpperCase() : "0",
+            timestamp: node.created_date || 0
+          });
+        } else {
+          console.log(`Undownloadable version`)
+        }
+      }
     };
-  }).filter(Boolean);
+
+    gqlEdges.forEach(edge => process(edge.node, "(Meta)"));
+    dbNodes.forEach(n => process(n, "(OculusDB)"));
+
+    const versionList = Array.from(mergedVersions.values())
+      .sort((a, b) => b.timestamp - a.timestamp);
 
     versionDataCache[channelId] = versionList;
-    if (versionsContainer) {
-      displayVersions(versionList, versionsContainer);
-    }
+    if (versionsContainer) displayVersions(versionList, versionsContainer);
     return versionList;
   } catch (error) {
     console.error("Failed to fetch versions:", error);
     if (versionsContainer) {
-      while (versionsContainer.firstChild) {
-        versionsContainer.removeChild(versionsContainer.firstChild);
-      }
+      while (versionsContainer.firstChild) versionsContainer.removeChild(versionsContainer.firstChild);
       const errorMsg = document.createElement('div');
       errorMsg.className = "no-dlc-message";
       errorMsg.textContent = "Error fetching versions.";
-      errorMsg.style.color = 'red';
       versionsContainer.appendChild(errorMsg);
     }
-    versionDataCache[channelId] = undefined;
     return [];
   }
 }
